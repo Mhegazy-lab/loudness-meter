@@ -1,0 +1,1 @@
+{"appearance":{"icon":{"src":"../icon-mono.png","type":"monochrome"},"icon_background":{"colors":["#FBBF24","#92400E","#451A03","#0E0B06"],"inner_glow_color":"#FDE68A","stops":[0.0,0.33,0.66,1.0]},"theme_color":"#FBBF24"},"description":"See how loud the room really is — live sound level meter.","name":"Loudness Meter","version":1}
