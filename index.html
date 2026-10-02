@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="application-name" content="Loudness Meter">
+<meta name="description" content="See how loud the room really is — live sound level meter.">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<title>Loudness Meter</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{background:#0E0B06;color:#F3F4F6;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+display:flex;align-items:center;justify-content:center;min-height:100dvh;
+-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+.app{width:min(480px,100vw - 24px);height:100dvh;max-height:780px;display:flex;flex-direction:column;
+padding:16px 14px 12px;gap:12px}
+header{text-align:center}
+header h1{font-size:22px;font-weight:700;letter-spacing:.5px;color:#FBBF24}
+.sub{font-size:13px;color:#9CA3AF;margin-top:2px}
+.meter{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;
+background:#141008;border:1px solid #3A2C12;border-radius:20px;padding:12px}
+.db{font-size:110px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;color:#FBBF24}
+.dbunit{font-size:18px;color:#9CA3AF;letter-spacing:2px;margin-top:-8px}
+.barwrap{width:100%;height:26px;background:#241C0C;border-radius:999px;overflow:hidden}
+.bar{height:100%;width:0%;background:#FBBF24;border-radius:999px;transition:width 80ms linear}
+.bar.loud{background:#EF4444}
+.level{font-size:24px;font-weight:800;letter-spacing:1px}
+.level.quiet{color:#34D399}
+.level.normal{color:#FBBF24}
+.level.loud{color:#FB923C}
+.level.veryloud{color:#EF4444}
+.msg{font-size:15px;color:#FCA5A5;text-align:center;min-height:22px}
+.controls{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+button{min-height:56px;border:none;border-radius:14px;font-size:20px;font-weight:800;cursor:pointer;
+font-family:inherit;color:#3A2404;background:#FBBF24}
+button:active{transform:scale(.97)}
+button.secondary{background:#2A2111;color:#FCD34D}
+button:disabled{background:#374151;color:#9CA3AF;cursor:default;transform:none}
+[data-focusable]:focus{outline:none}
+[data-focusable]:focus-visible{outline:3px solid #FBBF24;outline-offset:2px}
+.scale{width:100%;display:flex;justify-content:space-between;font-size:11px;color:#9CA3AF}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Loudness Meter</h1>
+    <div class="sub">Live sound level from your mic</div>
+  </header>
+
+  <div class="meter">
+    <div class="db" id="dbVal">--</div>
+    <div class="dbunit">dB</div>
+    <div class="barwrap"><div class="bar" id="bar"></div></div>
+    <div class="scale"><span>0</span><span>30</span><span>60</span><span>90</span><span>120</span></div>
+    <div class="level" id="levelLabel"></div>
+    <div class="msg" id="msg"></div>
+  </div>
+
+  <div class="controls">
+    <button id="startBtn" data-focusable>Start</button>
+    <button id="stopBtn" class="secondary" data-focusable disabled>Stop</button>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var stream=null, audioCtx=null, analyser=null, dataArr=null, rafId=null, active=false;
+
+var dbVal=document.getElementById("dbVal");
+var bar=document.getElementById("bar");
+var levelLabel=document.getElementById("levelLabel");
+var msg=document.getElementById("msg");
+var startBtn=document.getElementById("startBtn");
+var stopBtn=document.getElementById("stopBtn");
+
+/* Rough dB estimate from time-domain RMS. Mic gains are uncalibrated,
+   so treat this as a relative loudness indicator, not a lab measurement. */
+function dbEstimate(rms){
+  var db=Math.round(20*Math.log10(rms+1e-7)+90);
+  if(db<0){db=0;}
+  if(db>120){db=120;}
+  return db;
+}
+function levelFor(db){
+  if(db<50){return ["Quiet","quiet"];}
+  if(db<70){return ["Normal","normal"];}
+  if(db<85){return ["Loud","loud"];}
+  return ["Very loud","veryloud"];
+}
+
+function frame(){
+  if(!active){return;}
+  analyser.getByteTimeDomainData(dataArr);
+  var sum=0;
+  for(var i=0;i<dataArr.length;i++){
+    var v=(dataArr[i]-128)/128;
+    sum+=v*v;
+  }
+  var rms=Math.sqrt(sum/dataArr.length);
+  var db=dbEstimate(rms);
+  dbVal.textContent=String(db);
+  bar.style.width=(db/120*100).toFixed(1)+"%";
+  bar.classList.toggle("loud",db>=85);
+  var lv=levelFor(db);
+  levelLabel.textContent=lv[0];
+  levelLabel.className="level "+lv[1];
+  rafId=requestAnimationFrame(frame);
+}
+
+function start(){
+  msg.textContent="";
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+    msg.textContent="Microphone unavailable — allow mic access and try again.";
+    return;
+  }
+  navigator.mediaDevices.getUserMedia({audio:true}).then(function(s){
+    stream=s;
+    var Ctx=window.AudioContext||window.webkitAudioContext;
+    audioCtx=new Ctx();
+    var src=audioCtx.createMediaStreamSource(stream);
+    analyser=audioCtx.createAnalyser();
+    analyser.fftSize=2048;
+    src.connect(analyser);
+    dataArr=new Uint8Array(analyser.fftSize);
+    active=true;
+    startBtn.disabled=true;
+    stopBtn.disabled=false;
+    frame();
+  }).catch(function(){
+    msg.textContent="Microphone unavailable — allow mic access and try again.";
+  });
+}
+
+function stop(){
+  active=false;
+  if(rafId){cancelAnimationFrame(rafId);rafId=null;}
+  if(stream){stream.getTracks().forEach(function(t){try{t.stop();}catch(e){}});stream=null;}
+  if(audioCtx){try{audioCtx.close();}catch(e){}audioCtx=null;}
+  analyser=null; dataArr=null;
+  dbVal.textContent="--";
+  bar.style.width="0%";
+  bar.classList.remove("loud");
+  levelLabel.textContent="";
+  startBtn.disabled=false;
+  stopBtn.disabled=true;
+}
+
+startBtn.addEventListener("click",start);
+stopBtn.addEventListener("click",stop);
+
+/* D-pad: arrows move between controls, Enter activates */
+function focusables(){
+  return Array.prototype.slice.call(document.querySelectorAll("[data-focusable]"))
+    .filter(function(el){return !el.disabled && el.offsetParent!==null;});
+}
+document.addEventListener("keydown",function(e){
+  if(e.key==="Enter"){
+    e.preventDefault();
+    var active=document.activeElement;
+    if(active&&active.getAttribute("data-focusable")!==null){active.click();}
+    return;
+  }
+  var fwd=(e.key==="ArrowRight"||e.key==="ArrowDown");
+  var back=(e.key==="ArrowLeft"||e.key==="ArrowUp");
+  if(!fwd&&!back){return;}
+  e.preventDefault();
+  var items=focusables();
+  if(!items.length){return;}
+  var i=items.indexOf(document.activeElement);
+  if(i===-1){items[0].focus();return;}
+  i=(i+(fwd?1:-1)+items.length)%items.length;
+  items[i].focus();
+});
+
+startBtn.focus();
+})();
+</script>
+</body>
+</html>
